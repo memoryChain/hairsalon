@@ -1,0 +1,33 @@
+node_modules/
+library/
+temp/
+local/
+profiles/
+build/
+.cache/
+preview/core/
+.DS_Store
+*.log
+*.blend1
+__pycache__/
+
+preview/test-heads.json
+sceneresource/test-heads-*.png
+
+preview/user-head.json
+
+preview/user-body.jpg
+
+# 本机配置、凭据与编辑器缓存
+.agents/local.json
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+Thumbs.db
+*.blendbak
+*.pyc
+
+# 可重新生成的模型检查截图
+sceneresource/dense-scalp-*.png

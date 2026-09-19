@@ -1,0 +1,21 @@
+{
+  "name": "hair-salon-prototype",
+  "uuid": "5b1297c4-e784-4102-9aa6-0b0a87c491ad",
+  "version": "0.1.0",
+  "private": true,
+  "creator": {
+    "version": "3.8.8"
+  },
+  "scripts": {
+    "preview": "node scripts/build-core.cjs && node scripts/preview-server.cjs",
+    "test": "node scripts/build-core.cjs && node --test tests/*.test.cjs",
+    "typecheck": "tsc --noEmit --ignoreDeprecations 5.0 --skipLibCheck",
+    "fonts:setup": "node scripts/run-ui-fonts.cjs setup",
+    "fonts:build": "node scripts/run-ui-fonts.cjs build",
+    "fonts:check": "node scripts/ui-font-policy.js",
+    "models:generate": "python scripts/run-blender.py -- --python scripts/build-test-scalps.py"
+  },
+  "devDependencies": {
+    "typescript": "5.4.5"
+  }
+}

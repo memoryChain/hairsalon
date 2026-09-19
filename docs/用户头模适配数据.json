@@ -1,0 +1,26 @@
+{
+  "characterTriangles": 5174,
+  "characterVertices": 3324,
+  "characterColorMode": "原 UV 顶点采样；脸部独立干净肤色",
+  "sourceSha256": "fb3463dd9d347435034bcf3dab3a64301e545c52fc1c1178c7957c9510615c20",
+  "vertices": 1383,
+  "triangles": 2762,
+  "scalpRoots": 321,
+  "scalpFaces": 608,
+  "mouthVertices": 86,
+  "mouthMaxDisplacement": 0.07606735761697207,
+  "uniformScale": 2.35,
+  "sourceCenter": [
+    0,
+    0.69,
+    0
+  ],
+  "cutSourcePlane": "sourceY + 0.3 * sourceX = 0.435",
+  "skinTreatment": "原始贴图保留在参考对象；运行时改用独立干净皮肤材质",
+  "faceLayout": {
+    "width": 1.1,
+    "top": 1.86,
+    "height": 0.9,
+    "front": 0.25
+  }
+}

@@ -1,0 +1,40 @@
+CCEffect %{
+  techniques:
+  - name: opaque
+    passes:
+    - vert: user-character-vs:vert
+      frag: user-character-fs:frag
+      rasterizerState:
+        cullMode: none
+      properties:
+        mainTexture: { value: white }
+}%
+CCProgram user-character-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+  in vec3 a_position;
+  in vec4 a_color;
+  in vec2 a_texCoord;
+  out vec2 v_uv;
+  out vec4 v_color;
+  out float v_localY;
+  vec4 vert () {
+    v_uv = a_texCoord;
+    v_color = a_color;
+    v_localY = a_position.y;
+    return cc_matProj * cc_matView * cc_matWorld * vec4(a_position, 1.0);
+  }
+}%
+CCProgram user-character-fs %{
+  precision highp float;
+  #include <legacy/output-standard>
+  in vec2 v_uv;
+  in vec4 v_color;
+  in float v_localY;
+  uniform sampler2D mainTexture;
+  vec4 frag () {
+    vec3 color = mix(texture(mainTexture, v_uv).rgb, vec3(0.955, 0.755, 0.602), smoothstep(1.039, 1.1095, v_localY));
+    return CCFragOutput(vec4(SRGBToLinear(color * v_color.a), 1.0));
+  }
+}%

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "standard",
+    "scalpVertices": 321,
+    "scalpTriangles": 608,
+    "boundaryEdges": 32,
+    "rootMaxGap": 0,
+    "euler": 1,
+    "headVertices": 7270,
+    "headTriangles": 14528,
+    "headClosed": true,
+    "mainHeadTriangles": 12096,
+    "ears": [
+      {
+        "side": -1,
+        "anchor": 0.5637369,
+        "intentionalOverlap": 0.035,
+        "triangles": 1216
+      },
+      {
+        "side": 1,
+        "anchor": 0.5641119,
+        "intentionalOverlap": 0.035,
+        "triangles": 1216
+      }
+    ]
+  },
+  {
+    "id": "asymmetric",
+    "scalpVertices": 397,
+    "scalpTriangles": 756,
+    "boundaryEdges": 36,
+    "rootMaxGap": 0,
+    "euler": 1
+  }
+]
