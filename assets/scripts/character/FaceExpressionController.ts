@@ -11,7 +11,12 @@ export class FaceExpressionController {
     private untilBlink = 0; private blinkAge = -1;
     constructor(private readonly random:()=>number = Math.random) { this.scheduleBlink(); }
     private scheduleBlink():void { this.untilBlink = 2.5 + clamp(this.random(),0,1)*3; }
-    setEmotion(emotion:FaceEmotion):void { if(FACE_EMOTIONS.indexOf(emotion)>=0) this.emotion=emotion; }
+    setEmotion(emotion:FaceEmotion,immediate=false):void {
+        if(FACE_EMOTIONS.indexOf(emotion)<0)return;
+        this.emotion=emotion;
+        // 静态作品图直接使用完整表情；实时角色仍平滑过渡。
+        if(immediate){const look=LOOKS[emotion];this.browAngle=look[0];this.browHeight=look[1];this.eyeOpen=look[2];}
+    }
     /** 先将屏幕方向逆变换到头部坐标；背面不强行扭眼追手。 */
     lookAtScreen(x:number,y:number,yaw:number,pitch:number):void {
         if(![x,y,yaw,pitch].every(Number.isFinite)) return;

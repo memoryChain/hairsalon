@@ -2,9 +2,11 @@ import type { SurfaceHairSimulation } from './SurfaceHairSimulation';
 import type { HairProjection } from '../hair/HairScreenCutter';
 import { closest, inside } from './ScreenStroke';
 import { unposeRay } from './HeadPose';
+import { WindVisibility } from './WindVisibility';
 const ZERO = [0, 0, 0];
 /** 用当前保留发体拾取。梳理锁定起手发束；风场只在按住期间低频采样。 */
 export class HairBrush {
+    private readonly windVisibility=new WindVisibility();
     private screen = new Float64Array(0);
     private weights = new Float64Array(0);
     private sums = new Float64Array(0);
@@ -142,12 +144,17 @@ export class HairBrush {
         sim.setGroomTargets(this.sums, this.counts);
         sim.revision++;
     }
-    blow(sim: SurfaceHairSimulation, projection: HairProjection, x: number, y: number, dx: number, dy: number, radius: number, dt: number): number {
-        if (!Number.isFinite(dt) || dt <= 0 || !Number.isFinite(dx) || !Number.isFinite(dy) || Math.hypot(dx, dy) < 1e-8 || !this.pick(sim, projection, x, y, x, y, radius))
+    blow(sim: SurfaceHairSimulation, projection: HairProjection, x: number, y: number, dt: number): number {
+        if (sim.paused || sim.debugScalp || !Number.isFinite(dt) || dt <= 0 || !Number.isFinite(x) || !Number.isFinite(y))
             return 0;
-        projection.rayAt(x, y, this.a);
-        projection.rayAt(x + dx, y + dy, this.b);
-        let vx = this.b.dx / (-this.b.dz) - this.a.dx / (-this.a.dz), vy = this.b.dy / (-this.b.dz) - this.a.dy / (-this.a.dz), n = Math.hypot(vx, vy) || 1;
+        const center=sim.topology.asset.center;
+        projection.project(center[0],center[1],center[2],this.q);
+        projection.rayAt(this.q.x, this.q.y, this.a);
+        projection.rayAt(x, y, this.b);
+        if(Math.abs(this.a.dz)<1e-8||Math.abs(this.b.dz)<1e-8)return 0;
+        // 点击位置是风源，方向由风源指向头部中心。
+        let vx = this.a.dx / (-this.a.dz) - this.b.dx / (-this.b.dz), vy = this.a.dy / (-this.a.dz) - this.b.dy / (-this.b.dz), n = Math.hypot(vx, vy);
+        if(!Number.isFinite(n)||n<1e-5)return 0;
         vx /= n;
         vy /= n;
         this.a.dx = vx;
@@ -155,12 +162,12 @@ export class HairBrush {
         this.a.dz = 0;
         unposeRay(this.a, sim.yaw, sim.pitch, ZERO, this.local);
         const step = Math.min(dt, .1);
+        const visible=this.windVisibility.sample(sim,projection);
         let count = 0;
-        for (let group = 0; group < this.weights.length; group++)
-            if (this.weights[group] > 0) {
-                const weight = this.weights[group];
-                sim.fiberRig.comb(group, this.local.dx, this.local.dy, this.local.dz, 1 - Math.exp(-step * weight * 1.4), sim, this.delta);
-                sim.fiberRig.blow(group, vx, vy, 0, step * weight);
+        for (let group = 0; group < visible.length; group++)
+            if (visible[group]) {
+                sim.fiberRig.comb(group, this.local.dx, this.local.dy, this.local.dz, 1 - Math.exp(-step * 1.4), sim, this.delta);
+                sim.fiberRig.blow(group, vx, vy, 0, step);
                 count++;
             }
         if (count)

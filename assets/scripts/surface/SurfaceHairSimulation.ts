@@ -51,6 +51,7 @@ export class SurfaceHairSimulation {
     private priorYaw = 0;
     private physicsYaw = 0;
     style: HairStyle = 'spiky';
+    initialGrowth = 1;
     cuts = 0;
     revision = 0;
     paused = false;
@@ -75,8 +76,9 @@ export class SurfaceHairSimulation {
         this.scratch = new Float64Array(n * 3);
         this.reset(this.style);
     }
-    reset(style = this.style): void {
+    reset(style = this.style, growth = 1): void {
         this.style = style;
+        this.initialGrowth=Number.isFinite(growth)?Math.max(1,Math.min(2.6,growth)):1;
         let topology = this.hairlines.get(style);
         if (!topology) {
             topology = new ScalpTopology(createHairlineAsset(this.baseTopology, this.occluder, style));
@@ -163,6 +165,9 @@ export class SurfaceHairSimulation {
             y = a * r[k + 1] + b * (r[k + 1] + n[k + 1] * .26) + c * Math.min(r[k + 1] + .04, 1.95) + d * ey;
             z = a * r[k + 2] + b * (r[k + 2] + n[k + 2] * .26) + c * (center[2] + (ez - center[2]) * 1.08) + d * ez;
         }
+        x=r[k]+(x-r[k])*this.initialGrowth;
+        y=r[k+1]+(y-r[k+1])*this.initialGrowth;
+        z=r[k+2]+(z-r[k+2])*this.initialGrowth;
         if (this.groomed) {
             const weight = t * t;
             x += this.groomOffsets[k] * weight;

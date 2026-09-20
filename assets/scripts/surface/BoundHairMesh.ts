@@ -76,10 +76,10 @@ export class BoundHairMesh {
                 }
         return new BoundHairMesh(bindings, indices, caps);
     }
-    evaluate(sim: SurfaceHairSimulation, previous = false): Float64Array {
+    evaluate(sim: SurfaceHairSimulation, previous = false, stable = false): Float64Array {
         const p = previous ? this.previous : this.p, q = this.point;
         if (this.bindings.length && this.bindings[0].samples) {
-            const samples = sim.fiberRig.evaluate(sim, previous);
+            const samples = sim.fiberRig.evaluate(sim, previous, stable);
             for (let i = 0; i < this.bindings.length; i++) {
                 const b = this.bindings[i];
                 let x = 0, y = 0, z = 0;

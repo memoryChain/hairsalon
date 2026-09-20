@@ -1,4 +1,5 @@
 import { CameraZoom } from './CameraZoom';
+import { ComicBounds, stylingCameraZ } from '../gameplay/ComicFraming';
 import { FaceExpressionController, FACE_EMOTIONS } from '../character/FaceExpressionController';
 import { Camera, EventMouse, EventKeyboard, EventTouch, input, Input, KeyCode, Node, geometry, Vec3, screen } from 'cc';
 import { Ray } from '../hair/HairSimulation';
@@ -7,8 +8,10 @@ import { CONFIG, ToolMode } from '../core/PrototypeConfig';
 import { ScreenPoint } from '../hair/HairScreenCutter';
 import { SalonGesture } from '../surface/SalonGesture';
 export class SalonInput {
+    enabled = true;
     mode: ToolMode = 'cut';
     private readonly zoom = new CameraZoom();
+    private cameraBaseZ:number=CONFIG.cameraZ;
     readonly gesture: SalonGesture;
     private touchId = -1;
     private left = false;
@@ -29,6 +32,7 @@ export class SalonInput {
         input.on(Input.EventType.KEY_UP, this.keyUp, this);
     }
     update(dt: number): void {
+        if (!this.enabled) return;
         this.gesture.update(dt);
         if (this.left !== this.right)
             this.sim.turn((this.left ? -1 : 1) * Math.min(dt, 0.05) * 1.7);
@@ -44,13 +48,20 @@ export class SalonInput {
         this.applyZoom();
     }
     private wheel(e: EventMouse): void {
+        if (!this.enabled) return;
         this.cancelSingle(); this.zoom.wheel(-e.getScrollY() / 5); this.applyZoom();
     }
+    fitInitial(bounds:ComicBounds):void {
+        const size=screen.windowSize;
+        this.cameraBaseZ=stylingCameraZ(bounds,size.width/Math.max(1,size.height),CONFIG.fov,CONFIG.cameraY,CONFIG.cameraZ);
+        if(this.enabled)this.applyZoom();
+    }
     private applyZoom(): void {
-        const z = CONFIG.cameraZ * this.zoom.factor;
+        const z = this.cameraBaseZ * this.zoom.factor;
         if (this.camera.node.position.z !== z) this.camera.node.setPosition(0, CONFIG.cameraY, z);
     }
     private start(e: EventTouch): void {
+        if (!this.enabled) return;
         const location = e.getLocation();
         if (this.zoom.down(e.getID() ?? -1, location.x, location.y)) { this.cancelSingle(); return; }
         if (this.touchId !== -1)
@@ -105,6 +116,7 @@ export class SalonInput {
         out.dz = b.d.z;
     }
     private keyDown(e: EventKeyboard): void {
+        if (!this.enabled) return;
         if (e.keyCode === KeyCode.KEY_E && this.face) this.face.setEmotion(FACE_EMOTIONS[(this.face.mouthFrame+1)%FACE_EMOTIONS.length]);
         if (e.keyCode === KeyCode.KEY_A)
             this.left = true;

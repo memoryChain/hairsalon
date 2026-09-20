@@ -5,9 +5,60 @@ const {SurfaceHairSimulation}=require('../.cache/test-core/surface/SurfaceHairSi
 const {SurfaceHairGeometry}=require('../.cache/test-core/surface/SurfaceHairGeometry');
 const {SalonGesture}=require('../.cache/test-core/surface/SalonGesture');
 const {HairBrush}=require('../.cache/test-core/surface/HairBrush');
+const {WindVisibility}=require('../.cache/test-core/surface/WindVisibility');
 const {HAIR_PRESETS}=require('../.cache/test-core/core/HairstyleCatalog');
 const {StrokePlaneCutter}=require('../.cache/test-core/surface/StrokePlaneCutter');
 const projection={project(x,y,z,o){o.depth=6-z;o.x=300+x/o.depth*600;o.y=300+(y-1.65)/o.depth*600;},rayAt(x,y,o){const dx=(x-300)/600,dy=(y-300)/600,n=Math.hypot(dx,dy,1);Object.assign(o,{ox:0,oy:1.65,oz:6,dx:dx/n,dy:dy/n,dz:-1/n});}};
+
+test('四个方位的风源都吹向头中心，风线与受力同向，松手和取消清除特效',()=>{
+ for(const [dx,dy] of [[200,0],[-200,0],[0,200],[0,-200]]){
+  const s=new SurfaceHairSimulation(models[0]);s.reset('long');const q={},g=new SalonGesture(s,projection);
+  projection.project(...s.topology.asset.center,q);g.begin(q.x+dx,q.y+dy,'blow');s.fiberRig.stepWind(1/60);
+  let affected=0;
+  for(let i=0;i<s.fiberRig.wind.length;i+=3){const x=s.fiberRig.wind[i],y=s.fiberRig.wind[i+1];if(Math.hypot(x,y)<1e-10)continue;affected++;assert.ok(x*-dx+y*-dy>0);}
+  assert.ok(affected>0);assert.ok(g.windLines.lines.some(line=>line.alpha>0));
+  for(const line of g.windLines.lines)if(line.alpha>0)assert.ok((line.x1-line.x0)*-dx+(line.y1-line.y0)*-dy>0);
+  g.end(q.x+dx,q.y+dy);g.update(.4);assert.ok(g.windLines.lines.every(line=>line.alpha===0));
+  g.begin(q.x+dx,q.y+dy,'blow');g.cancel();assert.ok(g.windLines.lines.every(line=>line.alpha===0));
+ }
+});
+
+test('吹风从点击位置朝头中心，背景点击立即作用；背面不受力，转到背面后相反',()=>{
+ for(const yaw of [0,Math.PI]){
+  const s=new SurfaceHairSimulation(models[0]);s.reset('long');s.yaw=s.targetYaw=yaw;s.pitch=0;s.clearVelocity();
+  const original=s.fiberRig.fibers.map(f=>f.end.slice()),g=new SalonGesture(s,projection),q={};
+  projection.project(...s.topology.asset.center,q);g.begin(q.x+300,q.y,'blow');g.end(q.x+300,q.y);
+  s.fiberRig.stepWind(1/60);let affected=0,hidden=0;
+  for(const f of s.fiberRig.fibers){
+   const k=f.group*3;if(s.fiberRig.wind[k]<0){affected++;assert.ok(Math.abs(s.fiberRig.wind[k+1])<1e-9);}
+   if(f.normal[2]*Math.cos(yaw)<-.3){hidden++;assert.deepEqual(f.end,original[f.group]);assert.equal(s.fiberRig.wind[k],0);}
+  }
+  assert.ok(affected>0);assert.ok(hidden>0);assert.equal(s.cuts,0);
+ }
+});
+
+test('吹风下方不进入旋转；方向与移动轨迹无关，屏幕纵轴和像素密度不影响风向',()=>{
+ const a=new SurfaceHairSimulation(models[0]),b=new SurfaceHairSimulation(models[0]);a.reset('long');b.reset('long');
+ const flip={project(x,y,z,o){projection.project(x,y,z,o);o.x*=2;o.y=1200-o.y*2;},rayAt(x,y,o){projection.rayAt(x/2,(1200-y)/2,o);}};
+ const ga=new SalonGesture(a,projection),gb=new SalonGesture(b,flip,false);
+ ga.begin(0,0,'blow');gb.begin(0,1200,'blow',2);assert.equal(ga.action,'blow');assert.equal(gb.action,'blow');
+ // 风源在左下方继续向左移动，风仍向右上方吹向头部，不能跟随移动方向。
+ ga.move(-40,0);gb.move(-80,1200);ga.update(.05);gb.update(.05);a.fiberRig.stepWind(1/60);b.fiberRig.stepWind(1/60);
+ assert.ok(a.fiberRig.wind.some((v,i)=>i%3===0&&v>0));assert.ok(a.fiberRig.wind.every((v,i)=>i%3!==0||v>=0));
+ for(let i=0;i<a.fiberRig.wind.length;i++)assert.ok(Math.abs(a.fiberRig.wind[i]-b.fiberRig.wind[i])<1e-9);
+ for(let i=0;i<a.fiberRig.fibers.length;i++)assert.deepEqual(a.fiberRig.fibers[i].end,b.fiberRig.fibers[i].end);
+ const c=new SurfaceHairSimulation(models[0]),q={};projection.project(...c.topology.asset.center,q);
+ const before=c.fiberRig.fibers.map(f=>f.end.slice());new SalonGesture(c,projection).begin(q.x,q.y,'blow');assert.deepEqual(c.fiberRig.fibers.map(f=>f.end),before);
+});
+
+test('可见风场遮罩排除被另一层头发及头模遮住的发束',()=>{
+ const tri=z=>[-1,1,z,1,1,z,0,3,z],positions=new Float64Array([...tri(2),...tri(1)]);
+ const fibers=[0,1].map(group=>({group,ids:[group],root:[0,1.65,0],normal:[0,0,1]}));
+ const head={center:[0,1.65,0],headPositions:[],headIndices:[]};
+ const sim={yaw:0,pitch:0,lengths:[1,1],fiberRig:{fibers},topology:{asset:head},fiberMesh:{evaluate:()=>positions,indices:[0,1,2,3,4,5],groups:[0,1]}};
+ const visibility=new WindVisibility();assert.deepEqual([...visibility.sample(sim,projection)],[1,0]);
+ head.headPositions=tri(3);head.headIndices=[0,1,2];assert.deepEqual([...visibility.sample(sim,projection)],[0,0]);
+});
 function point(s){const m=s.cutMesh||s.fiberMesh,p=m.evaluate(s),q={},ray={};let hit=null,best=-Infinity;for(let f=0;f<m.indices.length;f+=3){const ids=m.indices.slice(f,f+3),x=ids.reduce((v,id)=>v+p[id*3]/3,0),y=ids.reduce((v,id)=>v+p[id*3+1]/3,0),z=ids.reduce((v,id)=>v+p[id*3+2]/3,0);projection.project(x,y,z,q);if(q.x<340||q.y>300)continue;projection.rayAt(q.x,q.y,ray);const d=(x-ray.ox)*ray.dx+(y-ray.oy)*ray.dy+(z-ray.oz)*ray.dz;if(d>=s.occluder.distance(ray,s.yaw,s.pitch)-1e-4)continue;const score=q.x-q.y*.15;if(score>best){best=score;hit={x:q.x,y:q.y};}}assert.ok(hit);return hit;}
 function length(f,bulge){let last=f.root,arc=0;for(let i=1;i<=16;i++){const t=i/16,q=1-t,p=f.root.map((v,a)=>q*q*q*v+3*q*q*t*(v+f.normal[a]*bulge)+3*q*t*t*f.control[a]+t*t*t*f.end[a]);arc+=Math.hypot(...p.map((v,a)=>v-last[a]));last=p;}return arc;}
 function stroke(s,g,p,dx=70,dy=150){g.begin(p.x,p.y,'comb');assert.equal(g.action,'comb');for(let i=1;i<=30;i++){g.move(p.x+dx*i/30,p.y+dy*i/30);s.advance(1/60);}g.end(p.x+dx,p.y+dy);}
@@ -26,7 +77,7 @@ test('剪后梳理不复活已剪几何，梳后仍能斜切和全剃',()=>{
  s.trim(new Float64Array(s.lengths.length));s.debris.length=0;const geometry=new SurfaceHairGeometry();geometry.update(s);assert.equal(geometry.count,0);
 });
 for(const model of models)test(model.id+'：吹风改变造型，松手消退余摆但保留曲线，恢复可清除',()=>{
- const s=new SurfaceHairSimulation(model);s.reset('long');const p=point(s),g=new SalonGesture(s,projection),original=s.fiberRig.fibers.map(f=>f.end.slice());g.begin(p.x,p.y,'blow');assert.equal(g.action,'blow');let peak=0;
+ const s=new SurfaceHairSimulation(model);s.reset('long');const p={x:300,y:100},g=new SalonGesture(s,projection),original=s.fiberRig.fibers.map(f=>f.end.slice());g.begin(p.x,p.y,'blow');assert.equal(g.action,'blow');let peak=0;
  for(let i=0;i<90;i++){g.update(1/60);s.advance(1/60);peak=Math.max(peak,...s.fiberRig.wind.map(Math.abs));}assert.ok(peak>.025);assert.equal(s.cuts,0);
  assert.ok(s.fiberRig.fibers.some((f,i)=>f.end[1]>original[i][1]+.1));g.end(p.x,p.y);
  const saved=s.fiberRig.fibers.map(f=>({end:f.end.slice(),control:f.control.slice()}));
@@ -45,9 +96,9 @@ test('剪后吹风保留切口拓扑，吹好后仍可继续剪和剃光',()=>{
 });
 test('暂停、查看头皮、空白和已剃区域不会梳理或吹动隐藏头发',()=>{
  const s=new SurfaceHairSimulation(models[0]);s.reset('long');const brush=new HairBrush(),p=point(s),original=s.fiberRig.fibers.map(f=>f.end.slice());
- for(const flag of ['paused','debugScalp']){s[flag]=true;assert.equal(brush.comb(s,projection,p.x,p.y,p.x+30,p.y+80,24,1),0);assert.equal(brush.blow(s,projection,p.x,p.y,0,1,46,.05),0);s[flag]=false;}
+ for(const flag of ['paused','debugScalp']){s[flag]=true;assert.equal(brush.comb(s,projection,p.x,p.y,p.x+30,p.y+80,24,1),0);assert.equal(brush.blow(s,projection,p.x,p.y,.05),0);s[flag]=false;}
  assert.equal(brush.comb(s,projection,0,0,10,10,24,1),0);assert.deepEqual(s.fiberRig.fibers.map(f=>f.end),original);
- s.trim(new Float64Array(s.lengths.length));brush.end();assert.equal(brush.comb(s,projection,p.x,p.y,p.x+30,p.y+80,24,1),0);assert.equal(brush.blow(s,projection,p.x,p.y,0,1,46,.05),0);
+ s.trim(new Float64Array(s.lengths.length));brush.end();assert.equal(brush.comb(s,projection,p.x,p.y,p.x+30,p.y+80,24,1),0);assert.equal(brush.blow(s,projection,p.x,p.y,.05),0);
 });
 test('相反纵轴与双倍像素密度的梳理方向一致',()=>{
  const a=new SurfaceHairSimulation(models[0]),b=new SurfaceHairSimulation(models[0]);a.reset('long');b.reset('long');const p=point(a),flip={project(x,y,z,o){projection.project(x,y,z,o);o.x*=2;o.y=1200-o.y*2;},rayAt(x,y,o){projection.rayAt(x/2,(1200-y)/2,o);}},ga=new SalonGesture(a,projection),gb=new SalonGesture(b,flip,false);ga.begin(p.x,p.y,'comb',1);gb.begin(p.x*2,1200-p.y*2,'comb',2);

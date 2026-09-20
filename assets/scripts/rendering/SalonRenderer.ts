@@ -1,7 +1,8 @@
 import { FaceExpressionController } from '../character/FaceExpressionController';
 import { FaceGeometry } from '../character/FaceGeometry';
 import { pose } from '../surface/HeadPose';
-import { EffectAsset, Texture2D, resources, warn, Camera, Color, Layers, Material, Mesh, MeshRenderer, Node, utils, Vec3, Quat, gfx } from 'cc';
+import { EffectAsset, Texture2D, RenderTexture, Sprite, SpriteFrame, UITransform, resources, warn, Camera, Color, Layers, Material, Mesh, MeshRenderer, Node, utils, Vec3, Quat, gfx } from 'cc';
+import { ComicBounds, comicCamera, comicRenderSize } from '../gameplay/ComicFraming';
 import { ResourcePaths } from '../core/ResourcePaths';
 import { CONFIG } from '../core/PrototypeConfig';
 import { createCharacter } from '../character/CharacterGeometry';
@@ -32,6 +33,10 @@ export class SalonRenderer {
     private texturedHead = false;
     private bodyMaterial: Material | null = null;
     private disposed = false;
+    private comicTexture: RenderTexture | null = null;
+    private comicFrame: SpriteFrame | null = null;
+    private comicTarget: Sprite | null = null;
+    private savedCameraPosition: Vec3 | null = null;
     private readonly characterMesh: Mesh;
     private readonly characterRenderer: MeshRenderer;
     constructor(parent: Node, simulation: SurfaceHairSimulation) {
@@ -134,8 +139,39 @@ export class SalonRenderer {
         this.faceMesh.updateSubMesh(0, this.faceGeometry.view);
         this.faceRenderer.onGeometryChanged();
     }
+    /** 同一角色、相机与动态网格直接渲染进漫画格；退出时恢复理发镜头。 */
+    setComicTarget(sprite: Sprite | null, bounds?: ComicBounds): void {
+        if (sprite === this.comicTarget) return;
+        this.comicTarget = sprite;
+        if (!sprite || !bounds) {
+            this.camera.targetTexture = null;
+            if (this.savedCameraPosition) this.camera.node.setPosition(this.savedCameraPosition);
+            this.savedCameraPosition = null;
+            return;
+        }
+        if (!this.savedCameraPosition) this.savedCameraPosition = this.camera.node.position.clone();
+        const size = sprite.node.getComponent(UITransform)!;
+        const {width,height}=comicRenderSize(size.width,size.height);
+        if (!this.comicTexture) this.comicTexture = new RenderTexture();
+        if (this.comicTexture.width !== width || this.comicTexture.height !== height) {
+            this.camera.targetTexture = null;
+            this.comicFrame?.destroy();
+            this.comicTexture.reset({ width, height });
+            this.comicTexture.setFilters(Texture2D.Filter.LINEAR,Texture2D.Filter.LINEAR);
+            this.comicTexture.setMipFilter(Texture2D.Filter.NONE);
+            this.comicFrame = new SpriteFrame();
+            this.comicFrame.texture = this.comicTexture;
+        }
+        sprite.spriteFrame = this.comicFrame;
+        const shot = comicCamera(bounds, size.width / size.height, CONFIG.fov);
+        this.camera.node.setPosition(shot.x, shot.y, shot.z);
+        this.camera.targetTexture = this.comicTexture;
+    }
     dispose(): void {
         this.disposed = true;
+        this.camera.targetTexture = null;
+        this.comicFrame?.destroy();
+        this.comicTexture?.destroy();
         this.world.destroy();
         for (const mesh of this.meshes)
             mesh.destroy();

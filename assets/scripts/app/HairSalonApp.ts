@@ -1,4 +1,5 @@
-import { _decorator, assetManager, resources, JsonAsset, Component, Font, game, Game, view, ResolutionPolicy } from 'cc';
+import { _decorator, assetManager, resources, JsonAsset, Component, Font, game, Game, view, ResolutionPolicy, Canvas } from 'cc';
+import { CutTrailHud } from '../ui/CutTrailHud';
 import { SurfaceHairSimulation } from '../surface/SurfaceHairSimulation';
 import { HeadAsset } from '../surface/ScalpTopology';
 import { SalonRenderer } from '../rendering/SalonRenderer';
@@ -6,6 +7,8 @@ import { PrototypeHud } from '../ui/PrototypeHud';
 import { SalonInput } from '../input/SalonInput';
 import { HairStyle, ToolMode, TOOL_HINTS } from '../core/PrototypeConfig';
 import { ResourcePaths } from '../core/ResourcePaths';
+import { SalonSession } from '../gameplay/SalonSession';
+import { SalonFlowHud } from '../ui/SalonFlowHud';
 const { ccclass } = _decorator;
 @ccclass('HairSalonApp')
 export class HairSalonApp extends Component {
@@ -17,6 +20,10 @@ export class HairSalonApp extends Component {
     private hudTime = 0;
     private renderedRevision = -1;
     private dead = false;
+    private session?: SalonSession;
+    private flow?: SalonFlowHud;
+    private cutTrail?: CutTrailHud;
+    private fonts?: [Font, Font];
     onLoad(): void {
         view.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
         this.hud = new PrototypeHud(this.node, style => this.changeStyle(style), mode => this.changeMode(mode), () => {
@@ -30,7 +37,8 @@ export class HairSalonApp extends Component {
             this.simulation.revision++;
             this.hud.selectInspect(this.simulation.debugScalp);
             this.renderer.sync(this.simulation);
-        }, ratio => this.controls?.zoomBy(ratio));
+        });
+        this.hud.setToolsVisible(false);
         this.hud.setStatus('正在载入用户头模');
         this.loadFonts();
         resources.load(ResourcePaths.userHead, JsonAsset, (error, asset) => {
@@ -48,6 +56,12 @@ export class HairSalonApp extends Component {
                 this.simulation.paused = this.hidden;
                 this.renderer = new SalonRenderer(this.node.parent!, this.simulation);
                 this.controls = new SalonInput(this.hud.inputSurface, this.renderer.camera, this.simulation, this.renderer.face);
+                this.cutTrail = new CutTrailHud(this.node,this.node.getComponent(Canvas)!.cameraComponent!,this.controls.gesture.cutTrail,this.controls.gesture.windLines);
+                this.session = new SalonSession(this.simulation, userHead);
+                this.flow = new SalonFlowHud(this.node, this.session, () => this.controls.cancel(), visible => this.hud.setToolsVisible(visible));
+                if (this.fonts) this.flow.applyFonts(...this.fonts);
+                this.controls.enabled = false;
+                this.hud.setGameplay('理发大师 · 今日营业');
             }
             catch (error) {
                 this.hud.setStatus('头皮数据校验失败');
@@ -68,7 +82,7 @@ export class HairSalonApp extends Component {
         this.renderer.sync(this.simulation);
     }
     private changeMode(mode: ToolMode): void {
-        if (!this.controls || (this.controls.mode === mode && !this.simulation.debugScalp))
+        if (this.flow?.blocksInput || !this.controls || (this.controls.mode === mode && !this.simulation.debugScalp))
             return;
         this.controls.cancel();
         if (this.simulation.debugScalp) {
@@ -103,6 +117,8 @@ export class HairSalonApp extends Component {
                         return;
                     }
                     this.hud.applyFonts(regular, bold);
+                    this.fonts = [regular, bold];
+                    this.flow?.applyFonts(regular, bold);
                 });
             });
         });
@@ -111,6 +127,13 @@ export class HairSalonApp extends Component {
         if (!this.simulation || !this.controls || this.simulation.paused)
             return;
         this.controls.update(dt);
+        this.session?.update(dt, this.controls.gesture.action);
+        this.flow?.sync();
+        this.renderer.setComicTarget(this.flow?.comicSprite ?? null, this.session?.comicBounds);
+        this.controls.enabled = !this.flow?.blocksInput;
+        if(this.session)this.controls.fitInitial(this.session.comicBounds);
+        this.cutTrail?.update();
+        if (this.session) this.renderer.face.setEmotion(this.session.emotion);
         this.renderer.updateFace(dt);
         if (this.simulation.advance(dt) || this.renderedRevision !== this.simulation.revision) {
             this.renderer.sync(this.simulation);
@@ -145,6 +168,8 @@ export class HairSalonApp extends Component {
         game.off(Game.EVENT_SHOW, this.show, this);
         this.controls?.dispose();
         this.hud?.dispose();
+        this.flow?.dispose();
+        this.cutTrail?.dispose();
         this.renderer?.dispose();
     }
 }

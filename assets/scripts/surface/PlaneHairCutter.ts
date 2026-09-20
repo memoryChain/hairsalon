@@ -1,6 +1,6 @@
 import { selectHairGroups } from './HairMeshGroups';
 import { addFiberDebris } from './FiberDebris';
-import { BoundHairMesh, CutPlane, blend } from './BoundHairMesh';
+import { Binding, BoundHairMesh, CutPlane, blend } from './BoundHairMesh';
 import { SurfaceHairSimulation } from './SurfaceHairSimulation';
 import { HairProjection } from '../hair/HairScreenCutter';
 import { Ray } from '../hair/HairSimulation';
@@ -202,6 +202,7 @@ export class PlaneHairCutter {
         }
         if (indices.length > LIMIT || bindings.length > 14000 || !closed(indices) || !closed(detached))
             return { changed: false, message: '本次切口超出原型预算或未闭合，请调整刀线' };
+        detachRootlessParts(bindings, indices, caps, groups, detached, detachedGroups);
         const used = new Map<number, number>(), compact = indices.map(i => {
             if (!used.has(i))
                 used.set(i, used.size);
@@ -219,6 +220,45 @@ export class PlaneHairCutter {
         sim.revision++;
         return { changed: true, discardedVolume, groups: Array.from(new Set(detachedGroups)), message: '已沿刀线斜切，切口随头发继续摆动' };
     }
+}
+/** 弯曲发缕可反复穿过刀面；处于保留半空间不代表仍连接着发根。仅在剪切提交时检查。 */
+function detachRootlessParts(bindings: Binding[], indices: number[], caps: boolean[], groups: number[], detached: number[], detachedGroups: number[]): void {
+    const parents = Int32Array.from(bindings, (_, i) => i);
+    const find = (id: number): number => {
+        while (parents[id] !== id) {
+            parents[id] = parents[parents[id]];
+            id = parents[id];
+        }
+        return id;
+    };
+    for (let f = 0; f < indices.length; f += 3) {
+        parents[find(indices[f + 1])] = find(indices[f]);
+        parents[find(indices[f + 2])] = find(indices[f]);
+    }
+    const rooted = new Set<number>();
+    for (const id of indices) {
+        const binding = bindings[id];
+        // 插值顶点即使含有部分根部权重，也不能充当实际发根。
+        if (binding.levels.every((level, j) => level === 0 || binding.weights[j] === 0))
+            rooted.add(find(id));
+    }
+    let keptFaces = 0;
+    for (let f = 0; f < indices.length; f += 3) {
+        if (rooted.has(find(indices[f]))) {
+            for (let j = 0; j < 3; j++)
+                indices[keptFaces * 3 + j] = indices[f + j];
+            caps[keptFaces] = caps[f / 3];
+            groups[keptFaces++] = groups[f / 3];
+        }
+        else {
+            // 整个闭合组件连同封口交给碎发；原绑定用于求当前/上一帧位置，继承速度。
+            // 两侧封口方向相反，碎发展开为独立三角形后仍保留各自的闭合表面。
+            detached.push(indices[f], indices[f + 1], indices[f + 2]);
+            detachedGroups.push(groups[f / 3]);
+        }
+    }
+    indices.length = keptFaces * 3;
+    caps.length = groups.length = keptFaces;
 }
 function closed(indices: number[]): boolean {
     const edges = new Map<string, number>();

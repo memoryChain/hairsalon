@@ -68,6 +68,10 @@ export class FiberRig {
                     end = [c[0] + best[0] * (.57 + best[3] * .86) + (normal[0] - best[0]) * .16, c[1] + best[1] * (.73 + best[3] * .86) + (normal[1] - best[1]) * .09 + noise, c[2] + best[2] * (.54 + best[3] * .86) + (normal[2] - best[2]) * .16];
                 control = root.map((v, a) => v * .38 + end[a] * .62 + normal[a] * .12);
             }
+            for(let axis=0;axis<3;axis++){
+                control[axis]=root[axis]+(control[axis]-root[axis])*sim.initialGrowth;
+                end[axis]=root[axis]+(end[axis]-root[axis])*sim.initialGrowth;
+            }
             const offsets = ids.map(id => [r[id * 3] - root[0], r[id * 3 + 1] - root[1], r[id * 3 + 2] - root[2]]);
             this.fibers.push({ ids, root, normal, control, end, offsets, base: samples, group, baseEnd: end.slice(), groomed: false, tipShape: .5 + .5 * Math.sin(rx * 17 + rz * 23 + ry * 9), restLength: curveLength(root, normal, control, end, HAIR_PRESETS[sim.style].bulge) });
             samples += ids.length * this.levels.length;
@@ -186,8 +190,8 @@ export class FiberRig {
         }
     }
     clearWindVelocity(): void { this.windVelocity.fill(0); this.previousWind.set(this.wind); }
-    evaluate(sim: SurfaceHairSimulation, previous: boolean): Float64Array {
-        const p = this.positions, yaw = previous ? sim.previousYaw : sim.yaw, pitch = previous ? sim.previousPitch : sim.pitch;
+    evaluate(sim: SurfaceHairSimulation, previous: boolean, stable = false): Float64Array {
+        const p = this.positions, yaw = stable ? 0 : previous ? sim.previousYaw : sim.yaw, pitch = stable ? 0 : previous ? sim.previousPitch : sim.pitch;
         for (const fiber of this.fibers) {
             let length = 0, dx = 0, dy = 0, dz = 0;
             for (const id of fiber.ids) {
@@ -205,6 +209,8 @@ export class FiberRig {
             dx += wind[wi];
             dy += wind[wi + 1];
             dz += wind[wi + 2];
+            // 评分与目标照片读取局部定型几何，不计临时风偏移和旋转惯性。
+            if (stable) dx = dy = dz = 0;
             if (!fiber.groomed && fiber.restLength < .5) {
                 // 极短发的摆幅按实际长度限制，避免停转惯性把发体推回头皮。
                 const movement = Math.hypot(dx, dy, dz), limit = fiber.restLength * .10 * length;

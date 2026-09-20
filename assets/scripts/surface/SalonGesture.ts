@@ -5,8 +5,13 @@ import { SurfaceHairSimulation } from './SurfaceHairSimulation';
 import { SurfaceScreenCutter } from './SurfaceScreenCutter';
 import { BoundHairMesh } from './BoundHairMesh';
 import { StrokePlaneCutter } from './StrokePlaneCutter';
+import { CutTrail } from '../effects/CutTrail';
+import { WindLines } from '../effects/WindLines';
 /** 下方起点锁定旋转；上方可从背景划入头发，剪切立即生效。 */
 export class SalonGesture {
+    readonly cutTrail=new CutTrail();
+    readonly windLines=new WindLines();
+    private readonly windCenter={x:0,y:0,depth:0};
     action: 'idle' | ToolMode = 'idle';
     startX = 0;
     startY = 0;
@@ -20,8 +25,6 @@ export class SalonGesture {
     private readonly shave = new SurfaceScreenCutter();
     private readonly brush = new HairBrush();
     private windTime = 0;
-    private windX = 0;
-    private windY = 1;
     private readonly scissors = new StrokePlaneCutter();
     private readonly ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     constructor(private readonly sim: SurfaceHairSimulation, private readonly projection: HairProjection, private readonly yUp = true) { }
@@ -50,26 +53,22 @@ export class SalonGesture {
         this.cutX = this.startX = this.x = x;
         this.cutY = this.startY = this.y = y;
         this.sim.stop();
-        this.action = this.isRotationArea(y) && !this.hitsHair(x, y) ? 'rotate' : mode === 'rotate' ? 'idle' : mode;
+        this.action = mode==='blow' ? 'blow' : this.isRotationArea(y) && !this.hitsHair(x, y) ? 'rotate' : mode === 'rotate' ? 'idle' : mode;
         this.feedback = this.action === 'rotate' ? '正在旋转：上下各三十度，松手即停' : TOOL_HINTS[mode];
-        this.windX = 0;
-        this.windY = this.yUp ? 1 : -1;
+        if(this.action==='blow')this.blow(.05);
         this.scissors.begin();
         this.shave.begin();
         this.sweep(x, y, x, y);
     }
     private sweep(x0: number, y0: number, x1: number, y1: number): void {
         if (this.action === 'cut' && Math.hypot(x1 - this.cutX, y1 - this.cutY) >= 2 * this.scale) {
+            if(!this.sim.debugScalp)this.cutTrail.add(this.cutX,this.cutY,x1,y1,this.scale);
             this.scissors.sweep(this.sim, this.projection, this.cutX, this.cutY, x1, y1, CONFIG.cutRadiusPixels * this.scale);
             this.cutX = x1;
             this.cutY = y1;
         }
         if (this.action === 'comb')
             this.brush.comb(this.sim, this.projection, x0, y0, x1, y1, 24 * this.scale, this.scale);
-        if (this.action === 'blow' && Math.hypot(x1 - x0, y1 - y0) > this.scale) {
-            this.windX = x1 - x0;
-            this.windY = y1 - y0;
-        }
         if (this.action === 'shave')
             this.shave.sweep(this.sim, this.projection, x0, y0, x1, y1, CONFIG.shaveRadiusPixels * this.scale, true);
     }
@@ -88,16 +87,23 @@ export class SalonGesture {
     end(x: number, y: number): void {
         this.move(x, y);
         this.feedback = TOOL_HINTS[this.tool];
-        this.cancel();
+        this.cancel(false);
     }
     update(dt: number): void {
+        this.cutTrail.update(dt);
+        this.windLines.update(dt);
         if (this.action !== 'blow' || this.sim.paused || this.sim.debugScalp || !Number.isFinite(dt) || dt <= 0)
             return;
         this.windTime += Math.min(dt, .05);
         if (this.windTime + 1e-9 >= .05) {
-            this.brush.blow(this.sim, this.projection, this.x, this.y, this.windX, this.windY, 46 * this.scale, this.windTime);
+            this.blow(this.windTime);
             this.windTime = 0;
         }
     }
-    cancel(): void { this.brush.end(); this.windTime = 0; this.action = 'idle'; this.shave.end(); this.scissors.end(); this.sim.stop(); }
+    private blow(dt:number):void {
+        if(!this.brush.blow(this.sim,this.projection,this.x,this.y,dt))return;
+        const c=this.sim.topology.asset.center;this.projection.project(c[0],c[1],c[2],this.windCenter);
+        this.windLines.pulse(this.x,this.y,this.windCenter.x,this.windCenter.y,this.scale);
+    }
+    cancel(clearTrail=true): void { if(clearTrail){this.cutTrail.clear();this.windLines.clear();}this.brush.end(); this.windTime = 0; this.action = 'idle'; this.shave.end(); this.scissors.end(); this.sim.stop(); }
 }

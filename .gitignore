@@ -17,6 +17,9 @@ sceneresource/test-heads-*.png
 preview/user-head.json
 
 preview/user-body.jpg
+preview/references/*.jpg
+preview/references/*.meta
+preview/references/credits.json
 
 # 本机配置、凭据与编辑器缓存
 .agents/local.json

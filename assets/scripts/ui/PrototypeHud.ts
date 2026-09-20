@@ -24,7 +24,7 @@ export class PrototypeHud {
     private alive = true;
     private mode: ToolMode = 'cut';
     private inspecting = false;
-    constructor(canvasNode: Node, onStyle: (style: HairStyle) => void, onMode: (mode: ToolMode) => void, onReset: () => void, onInspect: () => void, onZoom: (ratio: number) => void) {
+    constructor(canvasNode: Node, onStyle: (style: HairStyle) => void, onMode: (mode: ToolMode) => void, onReset: () => void, onInspect: () => void) {
         const canvas = canvasNode.getComponent(Canvas)!;
         const camera = this.camera = canvas.cameraComponent!;
         camera.clearFlags = Camera.ClearFlag.DEPTH_ONLY;
@@ -40,9 +40,6 @@ export class PrototypeHud {
         this.hint = this.label('滑动可连续剪发；头下方空白区域拖动旋转', 17, 0, 92, 660, this.bottomControls);
         this.button('previousStyle', '上一款', -80, -76, () => onStyle(cycleStyle(this.style, -1)), this.topControls);
         this.button('nextStyle', '下一款', 80, -76, () => onStyle(cycleStyle(this.style, 1)), this.topControls);
-        this.button('zoomOut', '拉远', -294, -165, () => onZoom(1 / .85), this.topControls, 98);
-        this.button('zoomReset', '复位', -294, -221, () => onZoom(0), this.topControls, 98);
-        this.button('zoomIn', '拉近', -294, -277, () => onZoom(.85), this.topControls, 98);
         this.button('cut', '剪发', -275, 38, () => onMode('cut'), this.bottomControls, 100);
         this.button('comb', '梳理', -165, 38, () => onMode('comb'), this.bottomControls, 100);
         this.button('blow', '吹风', -55, 38, () => onMode('blow'), this.bottomControls, 100);
@@ -133,6 +130,16 @@ export class PrototypeHud {
     setStatus(text: string): void {
         if (this.status.string !== text)
             this.status.string = text;
+    }
+    setToolsVisible(visible: boolean): void {
+        if(this.bottomControls.active!==visible)this.bottomControls.active=visible;
+    }
+    setGameplay(title: string): void {
+        this.styleLabel.string=title;this.status.node.active=false;
+        for(const id of ['previousStyle','nextStyle','inspect','reset'])this.controls.get(id)!.node.active=false;
+        ['cut','comb','blow','shave'].forEach((id,i)=>this.controls.get(id)!.node.setPosition(-180+i*120,38));
+        this.controls.get('comb')!.label.string='手 / 梳理';
+        this.hint.node.setPosition(0,176);
     }
     applyFonts(regular: Font, bold: Font): void {
         if (!this.alive)

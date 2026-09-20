@@ -1,5 +1,9 @@
+import { comicCamera, comicRenderSize, stylingCameraZ } from './core/gameplay/ComicFraming.js';
+import { SalonSession } from './core/gameplay/SalonSession.js';
+import { createSalonFlow } from './salon-flow.js';
+import { createCutTrail } from './cut-trail.js';
 import {CameraZoom} from './core/input/CameraZoom.js';
-import {bindCameraZoom,bindZoomButtons} from './camera-zoom.js';
+import {bindCameraZoom} from './camera-zoom.js';
 import { FaceGeometry } from './core/character/FaceGeometry.js';
 import { FaceExpressionController, FACE_EMOTIONS } from './core/character/FaceExpressionController.js';
 import { cycleStyle, styleTitle } from './core/core/HairstyleCatalog.js';
@@ -24,17 +28,17 @@ function shader(type, source) {
 }
 const program = gl.createProgram();
 gl.attachShader(program, shader(gl.VERTEX_SHADER, `attribute vec3 aPosition; attribute vec4 aColor; attribute vec2 aUV; varying vec2 vUV; varying float vLocalY;
-uniform float uCameraZ; uniform float uYaw; uniform float uPitch; uniform vec3 uCenter; uniform float uAspect; varying vec4 vColor;
+uniform float uCameraX; uniform float uCameraY; uniform float uCameraZ; uniform float uYaw; uniform float uPitch; uniform vec3 uCenter; uniform float uAspect; varying vec4 vColor;
 void main(){vUV=aUV;vLocalY=aPosition.y;float c=cos(uYaw),s=sin(uYaw),cp=cos(uPitch),sp=sin(uPitch);vec3 a=aPosition-uCenter;
 vec3 r=vec3(c*a.x+s*a.z,a.y,-s*a.x+c*a.z);vec3 p=vec3(r.x,cp*r.y-sp*r.z,sp*r.y+cp*r.z)+uCenter;
-p-=vec3(0.,${CONFIG.cameraY},uCameraZ);float f=1./tan(radians(${CONFIG.fov.toFixed(1)})/2.);
+p-=vec3(uCameraX,uCameraY,uCameraZ);float f=1./tan(radians(${CONFIG.fov.toFixed(1)})/2.);
 gl_Position=vec4(p.x*f/uAspect,p.y*f,-1.0033389*p.z-0.1001669,-p.z);vColor=aColor;}`));
 gl.attachShader(program, shader(gl.FRAGMENT_SHADER, 'precision mediump float; varying vec4 vColor; varying vec2 vUV; varying float vLocalY; uniform sampler2D uBody; uniform float uTextured; void main(){vec3 color=vColor.rgb;if(uTextured>.5)color=mix(texture2D(uBody,vUV).rgb,vec3(.955,.755,.602),smoothstep(1.039,1.1095,vLocalY))*vColor.a;gl_FragColor=vec4(color,1.);}'));
 gl.linkProgram(program); if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
 gl.useProgram(program); gl.enable(gl.DEPTH_TEST);
 const position = gl.getAttribLocation(program, 'aPosition'), color = gl.getAttribLocation(program, 'aColor');
 const yawUniform = gl.getUniformLocation(program, 'uYaw'), aspectUniform = gl.getUniformLocation(program, 'uAspect');
-const cameraZUniform=gl.getUniformLocation(program,'uCameraZ');
+const cameraZUniform=gl.getUniformLocation(program,'uCameraZ'),cameraYUniform=gl.getUniformLocation(program,'uCameraY'),cameraXUniform=gl.getUniformLocation(program,'uCameraX');
 const pitchUniform=gl.getUniformLocation(program,'uPitch'), centerUniform=gl.getUniformLocation(program,'uCenter');
 gl.enableVertexAttribArray(position); gl.enableVertexAttribArray(color);
 const uvAttribute=gl.getAttribLocation(program,'aUV'),texturedUniform=gl.getUniformLocation(program,'uTextured');
@@ -67,6 +71,9 @@ let mode = 'cut', pointer = null, left = false, right = false, previous = 0, sta
 const cursor = document.querySelector('#cursor'), hint = document.querySelector('#hint');
 const rotationZone=document.querySelector("#rotationZone");
 let gesture;
+const session = new URLSearchParams(location.search).has('sandbox') ? null : new SalonSession(sim,userHead);
+if(!session)document.querySelector('.bottom-controls').hidden=false;
+let flow = null;
 function end() { pointer = null; left = right = false; gesture?.cancel(); sim.stop(); }
 let renderedRevision = -1;
 function syncHair() { hair.update(sim); upload(hairDraw); renderedRevision = sim.revision; }
@@ -87,38 +94,43 @@ for (const tool of ['cut', 'comb', 'blow', 'shave']) document.getElementById(too
 document.getElementById('inspect').onclick=()=>{end();sim.debugScalp=!sim.debugScalp;document.getElementById('inspect').setAttribute('aria-pressed',String(sim.debugScalp));sim.revision++;hint.textContent=sim.debugScalp?'绿色为真实头皮；再次点击查看头皮返回操作。':toolHint();syncHair();};
 document.getElementById('reset').onclick = () => { end(); sim.debugScalp=false;document.getElementById('inspect').setAttribute('aria-pressed','false');sim.reset();hint.textContent=toolHint();syncHair(); };
 let cutRect = canvas.getBoundingClientRect();
+function stylingDistance(){
+    return (session?stylingCameraZ(session.comicBounds,cutRect.width/Math.max(1,cutRect.height),CONFIG.fov,CONFIG.cameraY,CONFIG.cameraZ):CONFIG.cameraZ)*zoom.factor;
+}
 const focal = Math.tan(CONFIG.fov * Math.PI / 360);
 const projection = {
     project(x, y, z, out) {
-        out.depth = CONFIG.cameraZ*zoom.factor - z;
+        out.depth = stylingDistance() - z;
         out.x = cutRect.left + cutRect.width / 2 + x / out.depth / focal * cutRect.height / 2;
         out.y = cutRect.top + cutRect.height / 2 - (y - CONFIG.cameraY) / out.depth / focal * cutRect.height / 2;
     },
     rayAt(x, y, out) {
         const dx = ((x - cutRect.left) / cutRect.width * 2 - 1) * focal * cutRect.width / cutRect.height;
         const dy = (1 - (y - cutRect.top) / cutRect.height * 2) * focal, n = Math.hypot(dx, dy, 1);
-        out.ox = 0; out.oy = CONFIG.cameraY; out.oz = CONFIG.cameraZ*zoom.factor;
+        out.ox = 0; out.oy = CONFIG.cameraY; out.oz = stylingDistance();
         out.dx = dx / n; out.dy = dy / n; out.dz = -1 / n;
     },
 };
 gesture=new SalonGesture(sim,projection,false);
+const cutTrail=createCutTrail(gesture.cutTrail,gesture.windLines,document.querySelector('main'));
+if(session)flow=createSalonFlow(session,end,canvas);
 function updateFeedback(){
     const text=sim.debugScalp?'绿色为真实头皮；选择工具返回操作。':gesture.feedback;
     if(hint.textContent!==text)hint.textContent=text;
 }
 bindCameraZoom(canvas,zoom,()=>{end();cursor.style.display='none';},()=>{cutRect=canvas.getBoundingClientRect();});
-bindZoomButtons(zoom,()=>{cutRect=canvas.getBoundingClientRect();},end);
 canvas.addEventListener('pointerdown', e => {
-    if(pointer!==null||e.button!==0)return;
+    if(flow?.blocksInput()||pointer!==null||e.button!==0)return;
     pointer=e.pointerId;canvas.setPointerCapture(pointer);cutRect=canvas.getBoundingClientRect();left=right=false;
     trackFace(e);gesture.begin(e.clientX,e.clientY,mode);updateFeedback();
 });
 function trackFace(e){const rect=canvas.getBoundingClientRect();const center={x:0,y:0,depth:0},edge={x:0,y:0,depth:0};projection.project(0,1.65,0,center);projection.project(.6,1.65,0,edge);const radius=Math.max(1,edge.x-center.x);face.lookAtScreen((e.clientX-center.x)/radius,(center.y-e.clientY)/radius,sim.yaw,sim.pitch);}
 canvas.addEventListener('pointermove', e => {
+    if(flow?.blocksInput()){cursor.style.display='none';return;}
     trackFace(e);
     const rect=canvas.getBoundingClientRect();cursor.style.left=`${e.clientX-rect.left}px`;cursor.style.top=`${e.clientY-rect.top}px`;
-    cutRect=rect;const rotating=gesture.action==='rotate'||(gesture.action==='idle'&&gesture.isRotationArea(e.clientY)&&!gesture.hitsHair(e.clientX,e.clientY));
-    cursor.style.display=mode!=='rotate'&&!rotating?'block':'none';cursor.style.width=cursor.style.height=mode==='shave'?`${CONFIG.shaveRadiusPixels*2}px`:mode==='comb'?'48px':mode==='blow'?'92px':'20px';
+    cutRect=rect;const rotating=mode!=='blow'&&(gesture.action==='rotate'||(gesture.action==='idle'&&gesture.isRotationArea(e.clientY)&&!gesture.hitsHair(e.clientX,e.clientY)));
+    cursor.style.display=mode!=='rotate'&&!rotating?'block':'none';cursor.style.width=cursor.style.height=mode==='shave'?`${CONFIG.shaveRadiusPixels*2}px`:mode==='comb'?'48px':'20px';
     canvas.style.cursor=rotating?'grab':mode==='rotate'?'default':'crosshair';
     if(e.pointerId!==pointer)return;
     cutRect=rect;gesture.move(e.clientX,e.clientY);updateFeedback();
@@ -130,7 +142,7 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointer)end();});canvas.addEventListener('lostpointercapture',()=>{if(pointer!==null)end();});
 canvas.addEventListener('pointerleave', () => { cursor.style.display = 'none'; });
 window.addEventListener('keydown', e => {
-    if (e.target instanceof HTMLButtonElement) return;
+    if (flow?.blocksInput() || e.target instanceof HTMLButtonElement) return;
     if (e.code === 'KeyE') face.setEmotion(FACE_EMOTIONS[(face.mouthFrame+1)%FACE_EMOTIONS.length]);
     if (e.code === 'KeyA') left = true; if (e.code === 'KeyD') right = true;
     if (e.code === 'Space') { e.preventDefault(); end(); }
@@ -139,19 +151,29 @@ window.addEventListener('keyup', e => { if (e.code === 'KeyA') left = false; if 
 window.addEventListener('blur', end);
 document.addEventListener('visibilitychange', () => { end(); face.suspend(); sim.clearVelocity(); previous = 0; });
 canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); sim.paused = true; status.textContent = '图形上下文已丢失，请刷新页面。'; status.classList.add('error'); });
-new ResizeObserver(() => {
+function resizeStage() {
     const ratio = Math.min(devicePixelRatio, 2), rect = canvas.getBoundingClientRect();
     cutRect=rect;rotationZone.style.top=`${gesture.rotationBoundary()-rect.top}px`;
-    canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio);
-}).observe(canvas);
+    const size=flow?.comicActive()?comicRenderSize(rect.width,rect.height):{width:Math.round(rect.width*ratio),height:Math.round(rect.height*ratio)};
+    if(canvas.width!==size.width)canvas.width=size.width;
+    if(canvas.height!==size.height)canvas.height=size.height;
+}
+new ResizeObserver(resizeStage).observe(canvas);
+let wasComic=false;
 function frame(time) {
+    if(document.hidden){previous=0;requestAnimationFrame(frame);return;}
     const dt = previous ? Math.min((time - previous) / 1000, 0.0667) : 0; previous = time;
-    gesture.update(dt);
+    if(!flow?.blocksInput())gesture.update(dt);
+    if(session){session.update(dt,gesture.action);face.setEmotion(session.emotion);flow.refresh();flow.updateMood();}
+    const isComic=!!flow?.comicActive();if(isComic!==wasComic){wasComic=isComic;resizeStage();}
+    cutTrail.update();
     faceTime+=dt;if(faceTime>=1/30){if(face.update(faceTime)){faceGeometry.update(face);upload(faceDraw);}faceTime=0;}
-    if (left !== right) sim.turn((left ? -1 : 1) * dt * 1.7);
+    if (!flow?.blocksInput() && left !== right) sim.turn((left ? -1 : 1) * dt * 1.7);
     if (sim.advance(dt) || renderedRevision !== sim.revision) syncHair();
     gl.viewport(0, 0, canvas.width, canvas.height); gl.clearColor(0.914, 0.894, 0.855, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.uniform1f(aspectUniform, canvas.width / canvas.height); gl.uniform1f(cameraZUniform, CONFIG.cameraZ*zoom.factor); draw(character, sim.yaw, sim.pitch); draw(faceDraw, sim.yaw, sim.pitch); draw(hairDraw, 0);
+    const aspect=canvas.width/canvas.height;
+    const shot=flow?.comicActive()?comicCamera(session.comicBounds,aspect,CONFIG.fov):{x:0,y:CONFIG.cameraY,z:stylingDistance()};
+    gl.uniform1f(aspectUniform,aspect);gl.uniform1f(cameraXUniform,shot.x);gl.uniform1f(cameraYUniform,shot.y);gl.uniform1f(cameraZUniform,shot.z); draw(character, sim.yaw, sim.pitch); draw(faceDraw, sim.yaw, sim.pitch); draw(hairDraw, 0);
     statusTime += dt;
     if (statusTime > 0.2 && !sim.paused) {
         statusTime = 0;
